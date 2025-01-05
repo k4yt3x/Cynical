@@ -19,7 +19,7 @@ void CreateRenderTarget() {
         return;
     }
 
-    hr = g_D3D11Device->CreateRenderTargetView(pBackBuffer, nullptr, &g_MainRTV);
+    hr = g_D3D11Device->CreateRenderTargetView(pBackBuffer, nullptr, &g_RTV);
     pBackBuffer->Release();
     if (FAILED(hr)) {
         DEBUG_PRINT("[!] Failed to create render target view\n");
@@ -27,9 +27,9 @@ void CreateRenderTarget() {
 }
 
 void CleanupRenderTarget() {
-    if (g_MainRTV) {
-        g_MainRTV->Release();
-        g_MainRTV = nullptr;
+    if (g_RTV) {
+        g_RTV->Release();
+        g_RTV = nullptr;
     }
 }
 
@@ -85,6 +85,104 @@ LRESULT CALLBACK ExternalWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+void* GetDXGIPresentAddress() {
+    // Create a hidden window for the dummy swap chain
+    WNDCLASSEX wc = {
+        sizeof(WNDCLASSEX),
+        CS_CLASSDC,
+        DefWindowProc,
+        0L,
+        0L,
+        GetModuleHandleW(nullptr),
+        nullptr,
+        nullptr,
+        nullptr,
+        nullptr,
+        L"DummyWindow",
+        nullptr
+    };
+    RegisterClassExW(&wc);
+
+    // Create a dummy window
+    HWND hDummyWnd = CreateWindowExW(
+        0,
+        wc.lpszClassName,
+        L"DummyWindow",
+        WS_OVERLAPPEDWINDOW,
+        0,
+        0,
+        100,
+        100,
+        nullptr,
+        nullptr,
+        wc.hInstance,
+        nullptr
+    );
+    if (!hDummyWnd) {
+        DEBUG_PRINT("[!] Failed to create dummy window.\n");
+        return nullptr;
+    }
+
+    // Temporary swap chain description
+    DXGI_SWAP_CHAIN_DESC scd{};
+    scd.BufferCount = 1;
+    scd.BufferDesc.Width = 100;
+    scd.BufferDesc.Height = 100;
+    scd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    scd.BufferDesc.RefreshRate.Numerator = 60;
+    scd.BufferDesc.RefreshRate.Denominator = 1;
+    scd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scd.OutputWindow = hDummyWnd;
+    scd.SampleDesc.Count = 1;
+    scd.SampleDesc.Quality = 0;
+    scd.Windowed = TRUE;
+    scd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+
+    ID3D11Device* pTempDevice = nullptr;
+    ID3D11DeviceContext* pTempContext = nullptr;
+    IDXGISwapChain* pTempSwapChain = nullptr;
+    D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+
+    // Create a dummy device and swap chain
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr,  // Adapter
+        D3D_DRIVER_TYPE_HARDWARE,
+        nullptr,  // Software
+        0,        // Flags
+        nullptr,  // pFeatureLevels
+        0,        // FeatureLevels count
+        D3D11_SDK_VERSION,
+        &scd,
+        &pTempSwapChain,
+        &pTempDevice,
+        &featureLevel,
+        &pTempContext
+    );
+    if (FAILED(hr)) {
+        DestroyWindow(hDummyWnd);
+        UnregisterClass(wc.lpszClassName, wc.hInstance);
+        DEBUG_PRINT("[!] Failed to create dummy device/swap chain. HRESULT = 0x%08X\n", hr);
+        return nullptr;
+    }
+
+    // Retrieve the Present pointer from the swap chain's vtable
+    void** vTable = *reinterpret_cast<void***>(pTempSwapChain);
+
+    // Present is typically at vtable index 8
+    void* pPresentAddr = vTable[8];
+    DEBUG_PRINT("[+] Dummy Device created. Present @ vtable[8] = 0x%p\n", pPresentAddr);
+
+    // Clean up the dummy objects
+    pTempSwapChain->Release();
+    pTempDevice->Release();
+    pTempContext->Release();
+
+    DestroyWindow(hDummyWnd);
+    UnregisterClass(wc.lpszClassName, wc.hInstance);
+
+    return pPresentAddr;
 }
 
 bool CreateExternalMenuWindow() {
@@ -224,7 +322,7 @@ bool InitImGuiOnceForMode(IDXGISwapChain* pSwapChain = nullptr) {
     return true;
 }
 
-HRESULT __stdcall HookedD3D11Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
+HRESULT __stdcall HookedIDXGISwapChainPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags) {
     if (!g_ImGuiInitialized) {
         InitImGuiOnceForMode(pSwapChain);
     }
@@ -239,10 +337,10 @@ HRESULT __stdcall HookedD3D11Present(IDXGISwapChain* pSwapChain, UINT SyncInterv
         ID3D11Texture2D* pBackBuffer = nullptr;
         pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
         if (pBackBuffer) {
-            g_D3D11Device->CreateRenderTargetView(pBackBuffer, nullptr, &g_MainRTV);
+            g_D3D11Device->CreateRenderTargetView(pBackBuffer, nullptr, &g_RTV);
             pBackBuffer->Release();
         }
-        g_D3D11DeviceContext->OMSetRenderTargets(1, &g_MainRTV, nullptr);
+        g_D3D11DeviceContext->OMSetRenderTargets(1, &g_RTV, nullptr);
 
         // Start the ImGui frame
         ImGui_ImplDX11_NewFrame();
@@ -258,7 +356,7 @@ HRESULT __stdcall HookedD3D11Present(IDXGISwapChain* pSwapChain, UINT SyncInterv
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     }
 
-    return g_OriginalD3DPresent(pSwapChain, SyncInterval, Flags);
+    return g_OriginalDXGIPresent(pSwapChain, SyncInterval, Flags);
 }
 
 // Main render loop for external mode
@@ -288,17 +386,17 @@ void RenderExternal() {
     }
 
     // Main display loop
-    while (g_OverlayActive) {
+    while (g_ImGuiVisible) {
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
 
             if (msg.message == WM_QUIT) {
-                g_OverlayActive = false;
+                g_ImGuiVisible = false;
             }
         }
-        if (!g_OverlayActive) {
+        if (!g_ImGuiVisible) {
             break;
         }
 
@@ -313,8 +411,8 @@ void RenderExternal() {
         ImGui::Render();
 
         constexpr float clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        g_D3D11DeviceContext->OMSetRenderTargets(1, &g_MainRTV, nullptr);
-        g_D3D11DeviceContext->ClearRenderTargetView(g_MainRTV, clearColor);
+        g_D3D11DeviceContext->OMSetRenderTargets(1, &g_RTV, nullptr);
+        g_D3D11DeviceContext->ClearRenderTargetView(g_RTV, clearColor);
 
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
         g_SwapChain->Present(1, 0);
@@ -337,10 +435,10 @@ bool Init() {
         }
 
         // Get the address of the Direct3D 11 Present function
-        void* pPresentAddr = Utils::D3D11::GetPresentAddress();
+        void* pPresentAddr = GetDXGIPresentAddress();
 
         // Create a hook for Present
-        if (MH_CreateHook(pPresentAddr, &HookedD3D11Present, reinterpret_cast<LPVOID*>(&g_OriginalD3DPresent)) !=
+        if (MH_CreateHook(pPresentAddr, &HookedIDXGISwapChainPresent, reinterpret_cast<LPVOID*>(&g_OriginalDXGIPresent)) !=
             MH_OK) {
             DEBUG_PRINT("[!] MH_CreateHook for Present failed.\n");
             return false;
