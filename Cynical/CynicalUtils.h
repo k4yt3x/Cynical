@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <initializer_list>
+#include <vector>
 
 #include <Windows.h>
 
@@ -16,11 +17,17 @@ namespace Utils {
 
 namespace Memory {
 
+__int64 ResolveAddress(__int64 baseAddress, std::initializer_list<__int64> offsets);
+
 template <typename T>
-void Write(__int64 baseAddress, T value, std::initializer_list<__int64> offsets = {});
+void Write(__int64 address, T value);
 
 template <typename K>
-K Read(__int64 baseAddress, std::initializer_list<__int64> offsets = {});
+K Read(__int64 address);
+
+void WriteBytes(__int64 address, const std::vector<BYTE>& bytes);
+
+std::vector<BYTE> ReadBytes(__int64 address, SIZE_T numBytes);
 
 }  // namespace Memory
 

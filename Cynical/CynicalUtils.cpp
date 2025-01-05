@@ -8,14 +8,17 @@ namespace Utils {
 
 namespace Memory {
 
-template <typename T>
-void Write(__int64 baseAddress, T value, std::initializer_list<__int64> offsets) {
+__int64 ResolveAddress(__int64 baseAddress, std::initializer_list<__int64> offsets) {
     __int64 address = baseAddress;
     for (auto offset : offsets) {
         address = *reinterpret_cast<__int64*>(address);
         address += offset;
     }
+    return address;
+}
 
+template <typename T>
+void Write(__int64 address, T value) {
     DWORD oldProtection;
     VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), PAGE_EXECUTE_READWRITE, &oldProtection);
     *reinterpret_cast<T*>(address) = value;
@@ -23,14 +26,21 @@ void Write(__int64 baseAddress, T value, std::initializer_list<__int64> offsets)
 }
 
 template <typename K>
-K Read(__int64 baseAddress, std::initializer_list<__int64> offsets) {
-    __int64 address = baseAddress;
-    for (auto offset : offsets) {
-        address = *reinterpret_cast<__int64*>(address);
-        address += offset;
-    }
-
+K Read(__int64 address) {
     return *reinterpret_cast<K*>(address);
+}
+
+void WriteBytes(__int64 address, const std::vector<BYTE>& bytes) {
+    DWORD oldProtection;
+    VirtualProtect(reinterpret_cast<void*>(address), bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtection);
+    memcpy(reinterpret_cast<void*>(address), bytes.data(), bytes.size());
+    VirtualProtect(reinterpret_cast<void*>(address), bytes.size(), oldProtection, &oldProtection);
+}
+
+std::vector<BYTE> ReadBytes(__int64 address, SIZE_T numBytes) {
+    std::vector<BYTE> bytes(numBytes);
+    memcpy(bytes.data(), reinterpret_cast<void*>(address), numBytes);
+    return bytes;
 }
 
 }  // namespace Memory

@@ -26,9 +26,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="DllMain.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="CynicalMenu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
