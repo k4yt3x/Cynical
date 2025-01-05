@@ -25,10 +25,12 @@ __int64 ResolveAddress(__int64 baseAddress, std::initializer_list<__int64> offse
         if (currentIndex < offsets.size() - 1) {
             address = *reinterpret_cast<__int64*>(address + offset);
         } else {
-            return address + offset;
+            address += offset;
         }
         currentIndex++;
     }
+
+    return address;
 }
 
 template <typename T>
